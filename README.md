@@ -1,4 +1,4 @@
-# JettonisedVault
+# JettonizedVault
 
 ## Project structure
 
