@@ -29,12 +29,14 @@ contract JettonizedVault with Jetton {
     content: Cell; // The content of the vault Jetton
     mintable: Bool; // Whether the vault can mint new shares
     max_supply: Int as coins; // The maximum supply of the vault Jettons
+
     // TODO: Move to a library
     // Constants
     const MAX_INT256: Int = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
     const MAX_COINS: Int = 0x199999999999999999999999999999;
     const DEPOSIT: Int = 1;
     const WITHDRAW: Int = 2;
+    const INCORRECT_ASSET: Int = 3;
     init(owner: Address, assetAddress: Address, content: Cell){
         self.owner = owner;
         self.asset = Asset{address: assetAddress};
@@ -56,40 +58,78 @@ contract JettonizedVault with Jetton {
                 body: "Initializing self wallet contract".asComment()
             }
         );
-
         self.ownWallet = walletAddress;
     }
 
-    // The vault interaction mechanism is called when the vault is notified of an incoming transfer
-    // If the incoming transfer is the underlying asset, it's converted to shares
-    // If the incoming transfer is shares, it's converted to the underlying asset
+    /**
+        The vault interaction mechanism is called when the vault is notified of an incoming transfer
+        - If it's the underlying asset, it's converted to shares
+        - If it's shares, it's converted to the underlying asset
+        - If it's an unrecognized token, the contract refunds it.
+    **/
     receive(msg: TransferNotification){
         // We check first that the transfer is coming from a wallet holding the asset
-        let mode: Int = _checkAsset(msg.from, msg.sender);
-        if(mode == DEPOSIT) {
+        let mode: Int = self._checkAsset(msg.from, sender());
+        if (mode == self.DEPOSIT) {
             // Convert the asset to shares
-            let shareAmount: Int = _convertToShares(msg.amount);
-            _mintShares(shareAmount, msg.from);
-        } else if(mode == WITHDRAW) {
+            let shareAmount: Int = self._convertToShares(msg.amount);
+            self._deposit(msg.amount);
+            self._mintShares(shareAmount, msg.from);
+        } else if (mode == self.WITHDRAW) {
             // Convert the shares to the asset
-            let assetAmount: Int = _convertToAssets(msg.amount);
+            let assetAmount: Int = self._convertToAssets(msg.amount);
             // Transfer the asset
-            _withdraw(msg.from, assetAmount);
+            self._withdraw(msg.from, assetAmount);
+        } else if (mode == self.INCORRECT_ASSET) {
+            // Refund the asset
+            // TODO: Response destination?
+            // TODO: Forward payload?
+            // TODO: Forward TON amount?
+            self._sendToken(msg.from, msg.amount, sender());
         }
     }
 
-    fun _checkAsset(depositor: Address, senderWallet: Address): Int {
+     fun _deposit(amount: Int) {
+        self.asset.balance += amount;
+    }
 
+    // TODO: Move to a library
+    // TODO: Response destination?
+    // TODO: Forward payload?
+    // TODO: Forward TON amount?
+
+     fun _sendToken(to: Address, amount: Int, wallet: Address) {
+        // We refund the asset to the sender
+        send(SendParameters{
+                to: wallet,
+                value: amount,
+                mode: SendRemainingValue,
+                bounce: true,
+                mode: SendIgnoreErrors, // don't stop in case of errors
+                body: TokenTransfer{
+                    queryId: 0,
+                    amount: amount,
+                    destination: to,
+                    response_dest: null, // TODO: implement?
+                    custom_payload: null,
+                    forward_ton_amount: ton("0"), // TODO: implement
+                    forward_payload: "Invalid transfer, refunding asset".asComment()
+                }
+            }
+        );
+    }
+
+     fun _checkAsset(depositor: Address, senderWallet: Address): Int {
         // We get the initial state of the asset jetton wallet for the depositor
         let assetInit: StateInit = initOf JettonDefaultWallet(self.asset.address, depositor);
-        if(contractAddress(assetInit) == senderWallet){
-            return DEPOSIT;
+        if (contractAddress(assetInit) == senderWallet) {
+            return self.DEPOSIT;
         } else {
-            let sharesInit: StateInit = initOf JettonDefaultWallet(sharesJetton, self.asset.address);
-            if(contractAddress(sharesInit) == sharesJetton){
-                return WITHDRAW;
+            let sharesInit: StateInit = initOf JettonDefaultWallet(self.ownWallet, self.asset.address);
+            if (contractAddress(sharesInit) == self.ownWallet) {
+                return self.WITHDRAW;
             } else {
-                throw("Invalid asset");
+                return self.REFUND;
             }
         }
     }
@@ -97,6 +137,19 @@ contract JettonizedVault with Jetton {
      fun _mintShares(amount: Int, to: Address) {
         require(self.mintable, "Minting is disabled");
         self.mint(to, amount, self.owner);
+    }
+
+     fun _withdraw(to: Address, amount: Int) {
+        // TODO: implement
+        self.burn(to, amount, self.owner);
+    }
+
+     fun _convertToShares(amount: Int): Int {
+        // TODO: implement
+    }
+
+     fun _convertToAssets(shares: Int): Int {
+        // TODO: implement
     }
 
     get fun asset(): Address {
@@ -111,6 +164,7 @@ contract JettonizedVault with Jetton {
 
     get fun convertToShares(amount: Int): Int {
         // TODO: implement
+        self._convertToShares(amount);
         return amount;
     }
 
