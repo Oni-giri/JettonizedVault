@@ -28,7 +28,8 @@ contract JettonizedVault with Jetton {
     ownWallet: Address; // The self wallet of the vault
     content: Cell; // The content of the vault Jetton
     mintable: Bool; // Whether the vault can mint new shares
-    max_supply: Int as coins; // The maximum supply of the vault Jettons
+    maxSupply: Int as coins; // The maximum supply of the vault Jettons
+    protocolWallet: Address; // The wallet of the protocol
 
     // TODO: Move to a library
     // Constants
@@ -36,14 +37,16 @@ contract JettonizedVault with Jetton {
     const MAX_COINS: Int = 0x199999999999999999999999999999;
     const DEPOSIT: Int = 1;
     const WITHDRAW: Int = 2;
-    const INCORRECT_ASSET: Int = 3;
-    init(owner: Address, assetAddress: Address, content: Cell){
+    const COMPOUND_ASSET: Int = 3;
+    const INCORRECT_ASSET: Int = 4;
+    init(owner: Address, assetAddress: Address, content: Cell, protocolWallet: Address){
         self.owner = owner;
         self.asset = Asset{address: assetAddress};
         self.content = content;
         self.mintable = true;
-        self.max_supply = 0x199999999999999999999999999999;
+        self.maxSupply = 0x199999999999999999999999999999;
         self.totalSupply = 0;
+        self.protocolWallet = protocolWallet;
         // We deploy a wallet for the vault
         let init: StateInit = initOf JettonDefaultWallet(myAddress(), myAddress());
         let walletAddress: Address = contractAddress(init);
@@ -74,12 +77,15 @@ contract JettonizedVault with Jetton {
             // Convert the asset to shares
             let shareAmount: Int = self._convertToShares(msg.amount);
             self._deposit(msg.amount);
+            // TODO: check the payload for the destination
             self._mintShares(shareAmount, msg.from);
         } else if (mode == self.WITHDRAW) {
             // Convert the shares to the asset
             let assetAmount: Int = self._convertToAssets(msg.amount);
-            // Transfer the asset
             self._withdraw(msg.from, assetAmount);
+        } else if (mode == self.COMPOUND_ASSET) {
+            // Compound the asset
+            self._compound(msg.amount);
         } else if (mode == self.INCORRECT_ASSET) {
             // Refund the asset
             // TODO: Response destination?
@@ -91,7 +97,20 @@ contract JettonizedVault with Jetton {
 
      fun _deposit(amount: Int) {
         self.asset.balance += amount;
+        self._sendToken(self.protocolWallet, amount, self.ownWallet);
     }
+
+     fun _withdraw(amount: Int, to: Address) {
+        self.asset.balance -= amount;
+        // Implement withdraw function with the mock wallet
+    }
+
+     fun _compound(amount: Int) {
+        self.asset.balance += amount;
+        self._sendToken(self.protocolWallet, amount, self.ownWallet);
+    }
+
+    // TODO: add a bounced handler for the asset
 
     // TODO: Move to a library
     // TODO: Response destination?
