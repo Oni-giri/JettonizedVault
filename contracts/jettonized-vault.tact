@@ -25,10 +25,10 @@ contract JettonizedVault with Jetton {
     totalSupply: Int as coins;
     // Jetton-specific data
     owner: Address;
-    ownWallet: Address; // The self wallet of the vault
+    own_wallet: Address; // The self wallet of the vault
     content: Cell; // The content of the vault Jetton
     mintable: Bool; // Whether the vault can mint new shares
-    maxSupply: Int as coins; // The maximum supply of the vault Jettons
+    max_supply: Int as coins; // The maximum supply of the vault Jettons
     protocolWallet: Address; // The wallet of the protocol
 
     // TODO: Move to a library
@@ -39,12 +39,13 @@ contract JettonizedVault with Jetton {
     const WITHDRAW: Int = 2;
     const COMPOUND_ASSET: Int = 3;
     const INCORRECT_ASSET: Int = 4;
+    const DECIMAL_FACTOR: Int = 1000000000;
     init(owner: Address, assetAddress: Address, content: Cell, protocolWallet: Address){
         self.owner = owner;
         self.asset = Asset{address: assetAddress};
         self.content = content;
         self.mintable = true;
-        self.maxSupply = 0x199999999999999999999999999999;
+        self.max_supply = self.MAX_INT256;
         self.totalSupply = 0;
         self.protocolWallet = protocolWallet;
         // We deploy a wallet for the vault
@@ -61,7 +62,7 @@ contract JettonizedVault with Jetton {
                 body: "Initializing self wallet contract".asComment()
             }
         );
-        self.ownWallet = walletAddress;
+        self.own_wallet = walletAddress;
     }
 
     /**
@@ -82,7 +83,8 @@ contract JettonizedVault with Jetton {
         } else if (mode == self.WITHDRAW) {
             // Convert the shares to the asset
             let assetAmount: Int = self._convertToAssets(msg.amount);
-            self._withdraw(msg.from, assetAmount);
+            self._withdraw(assetAmount, msg.from);
+            self._burn(msg.amount, msg.from);
         } else if (mode == self.COMPOUND_ASSET) {
             // Compound the asset
             self._compound(msg.amount);
@@ -108,6 +110,22 @@ contract JettonizedVault with Jetton {
      fun _compound(amount: Int) {
         self.asset.balance += amount;
         self._sendToken(self.protocolWallet, amount, self.ownWallet);
+    }
+
+    fun _burn(amount: Int, from: Address) {
+        // Burn tokens
+        send(SendParameters{  
+            to: self.master,
+            value: 0,
+            mode: SendRemainingValue,
+            bounce: true,
+            body: TokenBurnNotification{
+                queryId: msg.queryId,
+                amount: msg.amount,
+                owner: self.owner,
+                response_destination: self.owner
+            }.toCell()
+        });
     }
 
     // TODO: add a bounced handler for the asset
@@ -158,17 +176,12 @@ contract JettonizedVault with Jetton {
         self.mint(to, amount, self.owner);
     }
 
-     fun _withdraw(to: Address, amount: Int) {
-        // TODO: implement
-        self.burn(to, amount, self.owner);
-    }
-
      fun _convertToShares(amount: Int): Int {
-        // TODO: implement
+        return (aount * totalSupply * self.DECIMAL_FACTOR / self.asset.balance) / self.DECIMAL_FACTOR;
     }
 
      fun _convertToAssets(shares: Int): Int {
-        // TODO: implement
+        return (amount * self.asset.balance * self.DECIMAL_FACTOR / totalSupply) / self.DECIMAL_FACTOR;
     }
 
     get fun asset(): Address {
@@ -182,16 +195,13 @@ contract JettonizedVault with Jetton {
     // How many shares will I get if I deposit this amount of assets?
 
     get fun convertToShares(amount: Int): Int {
-        // TODO: implement
-        self._convertToShares(amount);
-        return amount;
+        return self._convertToShares(amount);
     }
 
     // How many assets will I get if I redeem this amount of shares?
 
     get fun convertToAssets(shares: Int): Int {
-        // TODO: implement
-        return shares;
+        return self._convertToAssets(shares);
     }
 
     // TODO: Move to a trait?
@@ -216,9 +226,5 @@ contract JettonizedVault with Jetton {
 
     get fun maxWithdraw(): Int {
         return self.MAX_INT256;
-    }
-
-    get fun name(): String {
-        return "Jettonized Vault";
     }
 }
