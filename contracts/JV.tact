@@ -6,20 +6,33 @@
 **/
 
 import "@stdlib/ownable";
+import "@stdlib/deploy";
 import "./jetton-wallet.tact";
 struct Asset {
     address: Address;
     balance: Int as coins = 0;
 }
-trait JettonizedVault with Jetton {
+message(0x7362d09c) TransferNotification {
+    queryId: Int as uint64;
+    amount: Int as coins;
+    from: Address;
+    forward_payload: Slice as remaining;
+}
+
+contract JV with Jetton {
+    // Vault-specific data
     asset: Asset;
-    ownWallet: Address;
-    protocolWallet: Address;
+    // Jetton-specific data
     owner: Address;
-    maxSupply: Int;
-    totalSupply: Int;
-    content: Cell;
-    mintable: Bool;
+    ownWallet: Address; // The self wallet of the vault
+    content: Cell; // The content of the vault Jetton
+    mintable: Bool; // Whether the vault can mint new shares
+    maxSupply: Int as coins; 
+    totalSupply: Int as coins; 
+    protocolWallet: Address; // The wallet of the protocol
+
+    // TODO: Move to a library
+    // Constants
     const MAX_INT256: Int = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
     const MAX_COINS: Int = 0x199999999999999999999999999999;
     const DEPOSIT: Int = 1;
@@ -27,6 +40,30 @@ trait JettonizedVault with Jetton {
     const COMPOUND_ASSET: Int = 3;
     const INCORRECT_ASSET: Int = 4;
     const DECIMAL_FACTOR: Int = 1000000000;
+    init(owner: Address, assetAddress: Address, content: Cell, protocolWallet: Address){
+        self.owner = owner;
+        self.asset = Asset{address: assetAddress};
+        self.content = content;
+        self.mintable = true;
+        self.maxSupply = self.MAX_INT256;
+        self.totalSupply = 0;
+        self.protocolWallet = protocolWallet;
+        // We deploy a wallet for the vault
+        let init: StateInit = initOf JettonDefaultWallet(myAddress(), myAddress());
+        let walletAddress: Address = contractAddress(init);
+        let value: Int = ton("1");
+        send(SendParameters{
+                // bounce is set to true by default
+                to: walletAddress,
+                value: value,
+                mode: SendIgnoreErrors, // don't stop in case of errors
+                code: init.code,
+                data: init.data,
+                body: "Initializing self wallet contract".asComment()
+            }
+        );
+        self.ownWallet = walletAddress;
+    }
 
     /**
         The vault interaction mechanism is called when the vault is notified of an incoming transfer
@@ -35,25 +72,53 @@ trait JettonizedVault with Jetton {
         - If it's an unrecognized token, the contract refunds it.
     **/
     receive(msg: TransferNotification){
+        // We check first that the transfer is coming from a wallet holding the asset
         let mode: Int = self._checkAsset(msg.from, sender());
+
+        // If we received assets, we mint shares to the sender
         if (mode == self.DEPOSIT) {
+            // Convert the asset to shares
             let shareAmount: Int = self._convertToShares(msg.amount);
-            self.asset.balance += msg.amount;
+            // Deposit the asset
             self._deposit(msg.amount);
-            self._mintShares(shareAmount, _checkRecipient(msg.from, msg.forward_payload));
+            // We check the payload to see if we need to forward the shares to another address
+            if(msg.forward_payload.bits() != 36){
+                self._mintShares(shareAmount, msg.from);
+            } else {
+                self._mintShares(shareAmount, msg.forward_payload.loadAddress());
+            }
         } else if (mode == self.WITHDRAW) {
-            self.asset.balance -= msg.amount;
-            self.totalSupply = (self.totalSupply - msg.amount);
-            self._burnShares(msg.amount);
-            self._withdraw(self._convertToAssets(msg.amount), msg.from);
+            self._withdraw(self._convertToAssets(msg.amount), 
+            msg.from);
+            self.totalSupply = self.totalSupply - msg.amount; // Update total supply
         } else if (mode == self.COMPOUND_ASSET) {
+            // Compound the asset
             self._compound(msg.amount);
         } else if (mode == self.INCORRECT_ASSET) {
+            // Refund the asset
+            // TODO: Response destination?
+            // TODO: Forward payload?
+            // TODO: Forward TON amount?
             self._sendToken(msg.from, msg.amount, sender());
         }
     }
 
-    fun _burnShares(amount: Int) {
+     fun _deposit(amount: Int) {
+        self.asset.balance += amount;
+        self._sendToken(self.protocolWallet, amount, self.ownWallet);
+    }
+
+     fun _withdraw(amount: Int, to: Address) {
+        self.asset.balance -= amount;
+        // Implement withdraw function with the mock wallet
+    }
+
+     fun _compound(amount: Int) {
+        self.asset.balance += amount;
+        // Implement compound function 
+    }
+
+    fun _burn(amount: Int, from: Address) {
         // Burn tokens
         send(SendParameters{  
             to: self.ownWallet,
@@ -69,9 +134,16 @@ trait JettonizedVault with Jetton {
         });
     }
 
+    // TODO: add a bounced handler for the asset
+
+    // TODO: Move to a library
+    // TODO: Response destination?
+    // TODO: Forward payload?
+    // TODO: Forward TON amount?
+
     // TODO: Check params
      fun _sendToken(to: Address, amount: Int, wallet: Address) {
-        let payload: Cell = emptyCell();
+        let payload: Cell? = emptyCell();
         send(SendParameters{
                 to: wallet,
                 value: amount,
@@ -81,8 +153,8 @@ trait JettonizedVault with Jetton {
                     queryId: 0,
                     amount: amount,
                     destination: to,
-                    response_destination: to,
-                    custom_payload: payload,
+                    response_destination: to, 
+                    custom_payload: payload, 
                     forward_ton_amount: ton("0"),
                     forward_payload: emptySlice()
                 }.toCell()
@@ -90,7 +162,7 @@ trait JettonizedVault with Jetton {
         );
     }
 
-    fun _checkAsset(depositor: Address, senderWallet: Address): Int {
+     fun _checkAsset(depositor: Address, senderWallet: Address): Int {
         // We get the initial state of the asset jetton wallet for the depositor
         let assetInit: StateInit = initOf JettonDefaultWallet(self.asset.address, depositor);
         if (contractAddress(assetInit) == senderWallet) {
@@ -105,24 +177,16 @@ trait JettonizedVault with Jetton {
         }
     }
 
-    fun _checkRecipient(from: Address, payload: Slice): Address {
-        if (payload.bits() == 36) {
-            return payload.loadAddress();
-        } else {
-            return from;
-        }
-    }
-
-    fun _mintShares(amount: Int, to: Address) {
+     fun _mintShares(amount: Int, to: Address) {
         require(self.mintable, "Minting is disabled");
         self.mint(to, amount, self.owner);
     }
 
-    fun _convertToShares(amount: Int): Int {
+     fun _convertToShares(amount: Int): Int {
         return (amount * self.totalSupply * self.DECIMAL_FACTOR / self.asset.balance) / self.DECIMAL_FACTOR;
     }
 
-    fun _convertToAssets(shares: Int): Int {
+     fun _convertToAssets(shares: Int): Int {
         return (shares * self.asset.balance * self.DECIMAL_FACTOR / self.totalSupply) / self.DECIMAL_FACTOR;
     }
 
@@ -138,31 +202,33 @@ trait JettonizedVault with Jetton {
         return self._convertToShares(amount);
     }
 
+    // How many assets will I get if I redeem this amount of shares?
+
     get fun convertToAssets(shares: Int): Int {
         return self._convertToAssets(shares);
     }
+
+    // TODO: Move to a trait?
+
+    get fun maxMintableShares(): Int {
+        return self.MAX_INT256;
+    }
+
+    // TODO: Move to a trait?
 
     get fun maxRedeemableAssets(): Int {
         return self.MAX_INT256;
     }
 
+    // TODO: Move to a trait?
+
     get fun maxDeposit(): Int {
         return self.MAX_INT256;
     }
 
+    // TODO: Move to a trait?
+
     get fun maxWithdraw(): Int {
         return self.MAX_INT256;
     }
-
-    virtual fun _deposit(amount: Int) {}
-
-    virtual fun _withdraw(amount: Int, to: Address) {}
-
-    virtual fun _compound(amount: Int) {}
-}
-message(0x7362d09c) TransferNotification {
-    queryId: Int as uint64;
-    amount: Int as coins;
-    from: Address;
-    forward_payload: Slice as remaining;
 }
