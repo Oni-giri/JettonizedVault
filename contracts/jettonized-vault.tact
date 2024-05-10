@@ -40,20 +40,26 @@ trait JettonizedVault with Jetton {
             let shareAmount: Int = self._convertToShares(msg.amount);
             self.asset.balance += msg.amount;
             self._deposit(msg.amount);
-            self._mintShares(shareAmount, _checkRecipient(msg.from, msg.forward_payload));
+            if (msg.forward_payload.bits() != 36) {
+                self._mintShares(shareAmount, msg.from);
+            } else {
+                self._mintShares(shareAmount, msg.forward_payload.loadAddress());
+            }
         } else if (mode == self.WITHDRAW) {
             self.asset.balance -= msg.amount;
             self.totalSupply = (self.totalSupply - msg.amount);
-            self._burnShares(msg.amount);
+            self._burnShares(msg.amount, msg.from);
+            // Add logic to add a recipient
             self._withdraw(self._convertToAssets(msg.amount), msg.from);
         } else if (mode == self.COMPOUND_ASSET) {
             self._compound(msg.amount);
         } else if (mode == self.INCORRECT_ASSET) {
-            self._sendToken(msg.from, msg.amount, sender());
+            // self._sendToken(msg.from, msg.from, msg.amount, sender());
+            throw(42);
         }
     }
 
-    fun _burnShares(amount: Int) {
+    fun _burnShares(amount: Int, responseDestination: Address) {
         // Burn tokens
         send(SendParameters{  
             to: self.ownWallet,
@@ -64,13 +70,13 @@ trait JettonizedVault with Jetton {
                 queryId: 0,
                 amount: amount,
                 owner: myAddress(),
-                response_destination: self.owner // TODO: implement?
+                response_destination: responseDestination
             }.toCell()
         });
     }
 
-    // TODO: Check params
-     fun _sendToken(to: Address, amount: Int, wallet: Address) {
+     fun _sendToken(to: Address, responseDestination: Address, amount: Int, wallet: Address) {
+        // TODO: Add gas check
         let payload: Cell = emptyCell();
         send(SendParameters{
                 to: wallet,
@@ -81,7 +87,7 @@ trait JettonizedVault with Jetton {
                     queryId: 0,
                     amount: amount,
                     destination: to,
-                    response_destination: to,
+                    response_destination: responseDestination,
                     custom_payload: payload,
                     forward_ton_amount: ton("0"),
                     forward_payload: emptySlice()
@@ -154,11 +160,11 @@ trait JettonizedVault with Jetton {
         return self.MAX_INT256;
     }
 
-    virtual fun _deposit(amount: Int) {}
+    abstract fun _deposit(amount: Int);
 
-    virtual fun _withdraw(amount: Int, to: Address) {}
+    abstract fun _withdraw(amount: Int, to: Address);
 
-    virtual fun _compound(amount: Int) {}
+    abstract fun _compound(amount: Int);
 }
 message(0x7362d09c) TransferNotification {
     queryId: Int as uint64;
