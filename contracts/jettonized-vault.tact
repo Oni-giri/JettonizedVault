@@ -20,6 +20,9 @@ trait JettonizedVault with Jetton {
     totalSupply: Int;
     content: Cell;
     mintable: Bool;
+    autoDeposit: Bool;
+    const minTonsForStorage: Int = ton("0.01");
+    const minTonsForGas: Int = ton("0.25");
     const MAX_INT256: Int = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
     const MAX_COINS: Int = 0x199999999999999999999999999999;
     const DEPOSIT: Int = 1;
@@ -35,11 +38,19 @@ trait JettonizedVault with Jetton {
         - If it's an unrecognized token, the contract refunds it.
     **/
     receive(msg: TransferNotification){
+        let ctx: Context = context();
+        // let fwdFee: Int = ctx.readForwardFee();
+        let minGas: Int = 2 * self.minTonsForGas + self.minTonsForStorage;
+        require(ctx.value > minGas, "Incorrect gas value");
         let mode: Int = self._checkAsset(msg.from, sender());
         if (mode == self.DEPOSIT) {
             let shareAmount: Int = self._convertToShares(msg.amount);
             self.asset.balance += msg.amount;
-            self._deposit(msg.amount);
+
+            // We let the dev choose if the deposit should be done now or later
+            if(self.autoDeposit == true) {
+                self._deposit(msg.amount);
+            }
             if (msg.forward_payload.bits() != 36) {
                 self._mintShares(shareAmount, msg.from);
             } else {
@@ -76,7 +87,6 @@ trait JettonizedVault with Jetton {
     }
 
      fun _sendToken(to: Address, responseDestination: Address, amount: Int, wallet: Address) {
-        // TODO: Add gas check
         let payload: Cell = emptyCell();
         send(SendParameters{
                 to: wallet,

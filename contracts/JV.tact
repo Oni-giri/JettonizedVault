@@ -31,7 +31,6 @@ contract JV with Jetton {
     totalSupply: Int as coins; 
     protocolWallet: Address; // The wallet of the protocol
 
-    // TODO: Move to a library
     // Constants
     const MAX_INT256: Int = 0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff;
     const MAX_COINS: Int = 0x199999999999999999999999999999;
