@@ -68,7 +68,6 @@ contract Vault with JettonizedVault {
     _sendToken(protocol, value, protocolWallet);
   }
 
-  override fun _compound(amount: Int) {}
 }
 message Withdraw {
   amount: Int;

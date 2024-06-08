@@ -24,8 +24,7 @@ trait JettonizedVault with Jetton {
     const MAX_COINS: Int = 0x199999999999999999999999999999;
     const DEPOSIT: Int = 1;
     const WITHDRAW: Int = 2;
-    const COMPOUND_ASSET: Int = 3;
-    const INCORRECT_ASSET: Int = 4;
+    const INCORRECT_ASSET: Int = 3;
     const DECIMAL_FACTOR: Int = 1000000000;
 
     /**
@@ -59,11 +58,13 @@ trait JettonizedVault with Jetton {
             self._burnShares(msg.amount, msg.from);
             // Add logic to add a recipient
             self._withdraw(self._convertToAssets(msg.amount), msg.from);
-        } else if (mode == self.COMPOUND_ASSET) {
-            self._compound(msg.amount);
         } else if (mode == self.INCORRECT_ASSET) {
-            throw(42);
+            self._sendToken(msg.from, msg.from, msg.amount, sender());
         }
+    }
+
+    receive(msg: Compound) {
+        self._compound(msg.amount, msg.payload);
     }
 
     fun _burnShares(amount: Int, responseDestination: Address) {
@@ -170,11 +171,16 @@ trait JettonizedVault with Jetton {
 
     abstract fun _withdraw(amount: Int, to: Address);
 
-    abstract fun _compound(amount: Int);
+    abstract fun _compound(amount: Int, payload: Cell);
 }
 message(0x7362d09c) TransferNotification {
     queryId: Int as uint64;
     amount: Int as coins;
     from: Address;
     forward_payload: Slice as remaining;
+}
+
+message Compound {
+    amount: Int;
+    payload: Cell; // Additional data, such as max slippage for instance
 }
