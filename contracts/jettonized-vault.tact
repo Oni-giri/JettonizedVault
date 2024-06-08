@@ -62,7 +62,6 @@ trait JettonizedVault with Jetton {
         } else if (mode == self.COMPOUND_ASSET) {
             self._compound(msg.amount);
         } else if (mode == self.INCORRECT_ASSET) {
-            self._sendToken(msg.from, msg.from, msg.amount, sender());
             throw(42);
         }
     }
