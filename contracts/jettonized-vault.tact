@@ -7,12 +7,9 @@
 
 import "@stdlib/ownable";
 import "./jetton-wallet.tact";
-struct Asset {
-    address: Address;
-    balance: Int as coins = 0;
-}
 trait JettonizedVault with Jetton {
-    asset: Asset;
+    asset: Address;
+    assetBalance: Int;
     ownWallet: Address;
     protocolWallet: Address;
     owner: Address;
@@ -45,7 +42,7 @@ trait JettonizedVault with Jetton {
         let mode: Int = self._checkAsset(msg.from, sender());
         if (mode == self.DEPOSIT) {
             let shareAmount: Int = self._convertToShares(msg.amount);
-            self.asset.balance += msg.amount;
+            self.assetBalance += msg.amount;
 
             // We let the dev choose if the deposit should be done now or later
             if(self.autoDeposit == true) {
@@ -57,7 +54,7 @@ trait JettonizedVault with Jetton {
                 self._mintShares(shareAmount, msg.forward_payload.loadAddress());
             }
         } else if (mode == self.WITHDRAW) {
-            self.asset.balance -= msg.amount;
+            self.assetBalance -= msg.amount;
             self.totalSupply = (self.totalSupply - msg.amount);
             self._burnShares(msg.amount, msg.from);
             // Add logic to add a recipient
@@ -65,7 +62,7 @@ trait JettonizedVault with Jetton {
         } else if (mode == self.COMPOUND_ASSET) {
             self._compound(msg.amount);
         } else if (mode == self.INCORRECT_ASSET) {
-            // self._sendToken(msg.from, msg.from, msg.amount, sender());
+            self._sendToken(msg.from, msg.from, msg.amount, sender());
             throw(42);
         }
     }
@@ -108,11 +105,11 @@ trait JettonizedVault with Jetton {
 
     fun _checkAsset(depositor: Address, senderWallet: Address): Int {
         // We get the initial state of the asset jetton wallet for the depositor
-        let assetInit: StateInit = initOf JettonDefaultWallet(self.asset.address, depositor);
+        let assetInit: StateInit = initOf JettonDefaultWallet(self.asset, depositor);
         if (contractAddress(assetInit) == senderWallet) {
             return self.DEPOSIT;
         } else {
-            let sharesInit: StateInit = initOf JettonDefaultWallet(self.ownWallet, self.asset.address);
+            let sharesInit: StateInit = initOf JettonDefaultWallet(self.ownWallet, self.asset);
             if (contractAddress(sharesInit) == self.ownWallet) {
                 return self.WITHDRAW;
             } else {
@@ -135,19 +132,19 @@ trait JettonizedVault with Jetton {
     }
 
     fun _convertToShares(amount: Int): Int {
-        return (amount * self.totalSupply * self.DECIMAL_FACTOR / self.asset.balance) / self.DECIMAL_FACTOR;
+        return (amount * self.totalSupply * self.DECIMAL_FACTOR / self.assetBalance) / self.DECIMAL_FACTOR;
     }
 
     fun _convertToAssets(shares: Int): Int {
-        return (shares * self.asset.balance * self.DECIMAL_FACTOR / self.totalSupply) / self.DECIMAL_FACTOR;
+        return (shares * self.assetBalance * self.DECIMAL_FACTOR / self.totalSupply) / self.DECIMAL_FACTOR;
     }
 
     get fun asset(): Address {
-        return self.asset.address;
+        return self.asset;
     }
 
     get fun totalAssets(): Int {
-        return self.asset.balance;
+        return self.assetBalance;
     }
 
     get fun convertToShares(amount: Int): Int {

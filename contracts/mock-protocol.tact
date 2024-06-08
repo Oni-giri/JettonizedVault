@@ -14,7 +14,9 @@ message(0x7362d09c) TransferNotification {
     forward_payload: Slice as remaining;
 }
 
-message()
+message Withdraw {
+    amount: Int;
+}
 
 // This is a mock contract to test the JettonizedVault contract
 // It receives assets and allows to claim yield after some time.
@@ -32,6 +34,30 @@ contract MockProtocol {
   receive(msg: TransferNotification){
         self.balance = msg.amount;
     }
+
+  receive(msg: Withdraw) {
+    _sendToken(msg.from, msg.from, msg.amount, wallet);
+  }
+
+    fun _sendToken(to: Address, responseDestination: Address, amount: Int, wallet: Address) {
+        let payload: Cell = emptyCell();
+        send(SendParameters{
+                to: wallet,
+                value: amount,
+                mode: SendRemainingValue,
+                bounce: true,
+                body: TokenTransfer{
+                    queryId: 0,
+                    amount: amount,
+                    destination: to,
+                    response_destination: responseDestination,
+                    custom_payload: payload,
+                    forward_ton_amount: ton("0"),
+                    forward_payload: emptySlice()
+                }.toCell()
+            }
+        );
+}
 
 
 }
